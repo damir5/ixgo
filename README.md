@@ -159,6 +159,7 @@ _, err := ctx.RunFile("main.go", src, nil)
 ```go
 ctx.MaxAlloc = 256 << 20
 safestd.Register(ctx) // github.com/goplus/ixgo/safestd
+safestd.Restrict(ctx, "example.com/tools") // imports: safestd.Packages plus these
 ```
 
 [safestd/SPEC.md](safestd/SPEC.md) lists every function it covers, the bound each one charges, and what stays uncovered. Your own Go functions can charge with `ixgo.Charge`, `ixgo.ChargeElems` and `ixgo.Refund`. When `MaxAlloc` is set, ixgo also compares heap growth with the charges every 256 steps and after slow native calls, and charges growth the charges do not explain. `MaxHeapAlloc` counts the whole process, so it is a backstop, not an exact per-program number.

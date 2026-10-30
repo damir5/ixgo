@@ -21,6 +21,7 @@
 //	ctx := ixgo.NewContext(0)
 //	ctx.MaxAlloc = 256 << 20
 //	safestd.Register(ctx)
+//	safestd.Restrict(ctx, "example.com/tools") // plus the host's packages
 package safestd
 
 import (
@@ -58,8 +59,8 @@ import (
 	_ "github.com/goplus/ixgo/pkg/unicode/utf8"
 )
 
-// Packages lists the import paths Register covers. A host that limits
-// allocation should let programs import only these.
+// Packages lists the import paths Register covers. Restrict lets programs
+// import only these and the host's own packages.
 var Packages = []string{
 	"bytes", "cmp", "encoding/base64", "encoding/hex", "encoding/json", "errors",
 	"fmt", "iter", "maps", "math", "math/bits", "slices", "sort", "strconv",

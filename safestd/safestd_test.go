@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/goplus/ixgo"
+	_ "github.com/goplus/ixgo/pkg/reflect"
+	_ "github.com/goplus/ixgo/pkg/time"
 	"github.com/goplus/ixgo/safestd"
 )
 
@@ -192,5 +194,36 @@ func TestWrappedFunctionsKeepResults(t *testing.T) {
 `)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A program may import only the covered packages and the host's own, never
+// unsafe, and nothing is loaded from source files.
+func TestRestrictImports(t *testing.T) {
+	cases := map[string]struct {
+		src  string
+		want string // part of the error, or "" to run
+	}{
+		"covered packages":         {`import ("fmt"; "maps"; "slices"); func main() { fmt.Println(slices.Max([]int{1, 3}), len(maps.Clone(map[int]int{1: 1}))) }`, ""},
+		"host package":             {`import "time"; func main() { println(time.Second) }`, ""},
+		"unsafe":                   {`import "unsafe"; func main() { println(unsafe.Sizeof(0)) }`, safestd.ErrImport.Error()},
+		"linkname":                 {`import _ "unsafe"; //go:linkname f fmt.Sprint` + "\n" + `func f(...any) string; func main() { println(f(1)) }`, safestd.ErrImport.Error()},
+		"registered, not allowed":  {`import "reflect"; func main() { println(reflect.TypeOf(0).Size()) }`, safestd.ErrImport.Error()},
+		"allowed, not registered":  {`import "container/list"; func main() { println(list.New().Len()) }`, "not found package"},
+		"not registered, standard": {`import "net/http"; func main() { _ = http.Get }`, safestd.ErrImport.Error()},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := ixgo.NewContext(0)
+			safestd.Register(ctx)
+			safestd.Restrict(ctx, "time", "container/list")
+			_, err := ctx.RunFile("main.go", "package main\n\n"+c.src+"\n", nil)
+			if c.want == "" && err != nil {
+				t.Fatalf("got %v, want no error", err)
+			}
+			if c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
+				t.Fatalf("got %v, want an error with %q", err, c.want)
+			}
+		})
 	}
 }

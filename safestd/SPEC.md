@@ -144,7 +144,11 @@ These paths allocate without a wrapper. The spot check charges them late, and `M
 
 ## Excluded packages
 
-A host that limits allocation should let programs import only `safestd.Packages`. ixgo registers packages for the whole process, so this needs an import check before the run. That check must also refuse `unsafe`.
+ixgo registers packages for the whole process, so a host that registered `os` for its own use would also expose it to programs. `safestd.Restrict(ctx, allow...)` lets programs import only `safestd.Packages` plus the host's own packages in `allow`:
+
+- It refuses `unsafe`, which `//go:linkname` also needs.
+- It checks only the program's own imports. Dependencies of an allowed package pass, because `slices` and `maps` import `unsafe` in their source.
+- It stops ixgo from loading packages from source files. Without that, an import of a package that is not registered, such as `container/list`, loads it from the Go installation and runs it.
 
 | Package | Why it is excluded |
 |---|---|

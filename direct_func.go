@@ -51,15 +51,29 @@ type DirectFuncVal struct {
 // Call runs the interpreted function and returns its result.
 // A function with no result returns nil. Multiple results are returned as a Tuple.
 func (c DirectFuncVal) Call(args ...any) any {
+	if c.interp.foreign() {
+		defer c.interp.recoverForeign()
+	}
 	return c.interp.callFunction(c.interp.tryDeferFrame(), c.pfn, args, c.env)
 }
 
 // CallDiscard runs the interpreted function and discards its results.
 func (c DirectFuncVal) CallDiscard(args ...any) {
+	if c.interp.foreign() {
+		defer c.interp.recoverForeign()
+	}
 	c.interp.callFunctionDiscardsResult(c.interp.tryDeferFrame(), c.pfn, args, c.env)
 }
 
-func (c DirectFuncVal) callReflect(args []reflect.Value) []reflect.Value {
+func (c DirectFuncVal) callReflect(args []reflect.Value) (results []reflect.Value) {
+	if c.interp.foreign() {
+		defer func() {
+			if results == nil {
+				results = zeroResults(c.typ)
+			}
+		}()
+		defer c.interp.recoverForeign()
+	}
 	return c.interp.callFunctionByReflect(c.interp.tryDeferFrame(), c.pfn, c.typ, args, c.env)
 }
 

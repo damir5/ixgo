@@ -19,9 +19,12 @@ package ixgo
 import (
 	"errors"
 	"go/types"
+	"reflect"
 	"runtime/metrics"
+	"sync"
 	"sync/atomic"
 
+	"github.com/visualfc/gid"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -118,6 +121,91 @@ func (i *Interp) chargeElems(n int, size uintptr) {
 		i.exceed(ErrAllocLimit)
 	}
 	i.charge(int64(n) * int64(size))
+}
+
+// natives maps a goroutine id to the Interp whose native call runs on that
+// goroutine, so registered Go functions can charge with Charge.
+var natives sync.Map // uint64 -> *Interp
+
+// bindNative records i as the Interp calling native code on this goroutine
+// and returns a function that restores the previous record.
+func (i *Interp) bindNative() func() {
+	id := gid.Get()
+	prev, had := natives.Swap(id, i)
+	return func() {
+		if had {
+			natives.Store(id, prev)
+		} else {
+			natives.Delete(id)
+		}
+	}
+}
+
+func nativeInterp() *Interp {
+	if v, ok := natives.Load(gid.Get()); ok {
+		return v.(*Interp)
+	}
+	return nil
+}
+
+// foreign reports whether limits are on and Go code is calling into the
+// program on a goroutine that is not running one of the program's native
+// calls, such as a time.AfterFunc callback.
+func (i *Interp) foreign() bool {
+	return i.lim.on && nativeInterp() != i
+}
+
+// recoverForeign stops the program when program code that Go code runs on its
+// own goroutine panics, instead of letting the panic end the host process.
+// The run returns the limit error, or the panic as for a go statement.
+func (i *Interp) recoverForeign() {
+	e := recover()
+	if e == nil {
+		return
+	}
+	if lp, ok := e.(limitPanic); ok {
+		i.lim.err.CompareAndSwap(nil, &lp.err)
+	}
+	select {
+	case i.cherror <- PanicError{Value: e}:
+	default:
+	}
+	i.Abort()
+}
+
+func zeroResults(typ reflect.Type) []reflect.Value {
+	results := make([]reflect.Value, typ.NumOut())
+	for k := range results {
+		results[k] = reflect.Zero(typ.Out(k))
+	}
+	return results
+}
+
+// Charge counts n bytes against MaxAlloc of the program that called the
+// running Go function. A Go function registered for interpreted programs
+// calls it before it allocates memory the program controls. When the limit
+// is exceeded, Charge stops the program and unwinds it with ErrAllocLimit.
+// Outside a call from a limited program, Charge does nothing.
+func Charge(n int64) {
+	if i := nativeInterp(); i != nil {
+		i.charge(n)
+	}
+}
+
+// ChargeElems is Charge for n elements of size bytes each. It treats a
+// product that overflows as exceeding the limit.
+func ChargeElems(n int, size uintptr) {
+	if i := nativeInterp(); i != nil {
+		i.chargeElems(n, size)
+	}
+}
+
+// Refund returns n bytes charged with Charge, for a function that charged
+// an upper bound and kept less.
+func Refund(n int64) {
+	if i := nativeInterp(); i != nil && i.lim.maxAlloc > 0 {
+		i.lim.charged.Add(-n)
+	}
 }
 
 // Steps returns the number of branches and calls the program has executed.

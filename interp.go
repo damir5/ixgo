@@ -160,7 +160,15 @@ func (i *Interp) tryDeferFrame() *frame {
 	return &frame{}
 }
 
-func (pfn *function) callFunctionByReflect(mtyp reflect.Type, args []reflect.Value, env []interface{}) []reflect.Value {
+func (pfn *function) callFunctionByReflect(mtyp reflect.Type, args []reflect.Value, env []interface{}) (results []reflect.Value) {
+	if pfn.Interp.foreign() {
+		defer func() {
+			if results == nil {
+				results = zeroResults(mtyp)
+			}
+		}()
+		defer pfn.Interp.recoverForeign()
+	}
 	return pfn.Interp.callFunctionByReflect(pfn.Interp.tryDeferFrame(), pfn, mtyp, args, env)
 }
 
@@ -1116,6 +1124,9 @@ func (i *Interp) callFunctionByStackNoRecoverWithEnv(caller *frame, pfn *functio
 }
 
 func (i *Interp) callExternal(caller *frame, fn reflect.Value, args []value, env []value) value {
+	if i.lim.on {
+		defer i.bindNative()()
+	}
 	i.trackDeferFrame(caller)
 	var ins []reflect.Value
 	typ := fn.Type()
@@ -1159,6 +1170,9 @@ func (i *Interp) callExternal(caller *frame, fn reflect.Value, args []value, env
 	}
 }
 func (i *Interp) callExternalDiscardsResult(caller *frame, fn reflect.Value, args []value, env []value) {
+	if i.lim.on {
+		defer i.bindNative()()
+	}
 	i.trackDeferFrame(caller)
 	var ins []reflect.Value
 	typ := fn.Type()
@@ -1187,6 +1201,9 @@ func (i *Interp) callExternalDiscardsResult(caller *frame, fn reflect.Value, arg
 }
 
 func (i *Interp) callExternalByStack(caller *frame, fn reflect.Value, ir register, ia []register, dests []register) {
+	if i.lim.on {
+		defer i.bindNative()()
+	}
 	i.trackDeferFrame(caller)
 	var ins []reflect.Value
 	typ := fn.Type()
@@ -1224,6 +1241,9 @@ func (i *Interp) callExternalByStack(caller *frame, fn reflect.Value, ir registe
 }
 
 func (i *Interp) callExternalWithFrameByStack(caller *frame, fn reflect.Value, ir register, ia []register, dests []register) {
+	if i.lim.on {
+		defer i.bindNative()()
+	}
 	i.trackDeferFrame(caller)
 	var ins []reflect.Value
 	typ := fn.Type()

@@ -178,3 +178,16 @@ func main() {
 		}
 	}
 }
+
+// A limit hit in program code that Go code calls on its own goroutine must
+// end the run, not the host process.
+func TestLimitInForeignGoroutine(t *testing.T) {
+	err := runLimited(t, `import "time"
+func main() {
+	time.AfterFunc(0, func() { for {} })
+	time.Sleep(10 * time.Second)
+}`, steps(1e6))
+	if !errors.Is(err, ixgo.ErrStepLimit) {
+		t.Fatalf("got %v, want ErrStepLimit", err)
+	}
+}

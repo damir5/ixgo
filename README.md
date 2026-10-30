@@ -154,7 +154,16 @@ ctx.MaxHeapAlloc = 256 << 20 // process-wide heap allocation since the run start
 _, err := ctx.RunFile("main.go", src, nil)
 ```
 
-`MaxAlloc` does not see allocations inside native Go functions (for example `strings.Repeat`); wrap such functions before registering them. `MaxHeapAlloc` counts the whole process, so it is a backstop, not an exact per-program number.
+`MaxAlloc` does not see allocations inside native Go functions (for example `strings.Repeat`). Package `safestd` replaces the standard library functions that need it with versions that charge first:
+
+```go
+ctx.MaxAlloc = 256 << 20
+safestd.Register(ctx) // github.com/goplus/ixgo/safestd
+```
+
+[safestd/SPEC.md](safestd/SPEC.md) lists every function it covers, the bound each one charges, and what stays uncovered. Your own Go functions can charge with `ixgo.Charge`, `ixgo.ChargeElems` and `ixgo.Refund`. `MaxHeapAlloc` counts the whole process, so it is a backstop, not an exact per-program number.
+
+With limits on, a panic in program code that Go code runs on its own goroutine (for example a `time.AfterFunc` callback) ends the run with an error instead of the host process.
 
 ### ixgo demo
 

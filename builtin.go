@@ -49,6 +49,9 @@ func (inter *Interp) callBuiltin(fr *frame, fn *ssa.Builtin, args []value, ssaAr
 		if i0+i1 < i0 {
 			panic(fr.runtimeError(fn, errAppendOutOfRange))
 		}
+		if inter.lim.on && i0+i1 > v0.Cap() {
+			inter.chargeElems(i0+i1, v0.Type().Elem().Size())
+		}
 		return reflect.AppendSlice(v0, v1).Interface()
 
 	case "copy": // copy([]T, []T) int or copy([]byte, string) int
@@ -356,6 +359,9 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 			i1 := v1.Len()
 			if i0+i1 < i0 {
 				panic(fr.runtimeError(fn, errAppendOutOfRange))
+			}
+			if interp.lim.on && i0+i1 > v0.Cap() {
+				interp.chargeElems(i0+i1, v0.Type().Elem().Size())
 			}
 			fr.setReg(ir, reflect.AppendSlice(v0, v1).Interface())
 		}

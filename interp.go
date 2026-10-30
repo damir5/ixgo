@@ -102,6 +102,7 @@ type Interp struct {
 	exited       int32                                       // is call os.Exit
 	gcEnabled    bool                                        // program can invoke runtime.GC
 	execution    *ExecutionTracker                           // optional execution tracking session
+	lim          limits                                      // optional step and allocation limits
 	interpExt
 }
 
@@ -206,6 +207,7 @@ type frame struct {
 	pred      int32
 	deferid   uint64
 	memoState *interpreterMemoState
+	depth     int32 // interpreted call depth, kept only when limits are set
 }
 
 func dumpBlock(block *ssa.BasicBlock, level int, pc ssa.Instruction) {
@@ -1332,6 +1334,9 @@ func doRecover(caller *frame) value {
 		caller._panic.isNil() &&
 		caller.caller != nil && !caller.caller._panic.isNil() {
 		p := caller.caller._panic.arg
+		if _, ok := p.(limitPanic); ok {
+			return nil
+		}
 		caller.caller._panic.recovered = true
 		switch p := p.(type) {
 		case PanicError:
@@ -1382,6 +1387,7 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 		mainid:       GoroutineID(),
 		execution:    ctx.execution,
 	}
+	i.lim.init(ctx)
 
 	ctx.loadPkgMu.Lock()
 	defer ctx.loadPkgMu.Unlock()
@@ -1533,6 +1539,8 @@ func (i *Interp) RunFunc(name string, args ...Value) (r Value, err error) {
 		switch p := recover().(type) {
 		case nil:
 			// nothing
+		case limitPanic:
+			err = p.err
 		case exitPanic:
 			i.exitCode = int(p)
 			atomic.StoreInt32(&i.exited, 1)

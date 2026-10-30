@@ -224,6 +224,9 @@ func (p *function) allocFrame(caller *frame) *frame {
 	fr.caller = caller
 	fr.deferid = caller.deferid
 	caller.callee = fr
+	if p.Interp.lim.on {
+		p.Interp.enterCall(caller, fr)
+	}
 	return fr
 }
 
@@ -265,6 +268,9 @@ func (p *function) allocFrameFromCaller(caller *frame) *frame {
 			spare.caller = caller
 			spare.deferid = caller.deferid
 			caller.callee = spare
+			if p.Interp.lim.on {
+				p.Interp.enterCall(caller, spare)
+			}
 			return spare
 		}
 	}
@@ -643,6 +649,13 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			ir := pfn.regIndex(instr)
 			t := xtype.TypeOfType(typ.Elem())
 			pt := xtype.TypeOfType(typ)
+			if interp.lim.on {
+				size := int64(typ.Elem().Size())
+				return func(fr *frame) {
+					interp.charge(size)
+					fr.setReg(ir, xtype.New(t, pt))
+				}
+			}
 			return func(fr *frame) {
 				fr.setReg(ir, xtype.New(t, pt))
 			}
@@ -771,7 +784,17 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 	case *ssa.ChangeType:
 		return makeTypeChangeInstr(pfn, instr)
 	case *ssa.Convert:
-		return makeConvertInstr(pfn, interp, instr)
+		fn := makeConvertInstr(pfn, interp, instr)
+		if interp.lim.on {
+			if per := convertBytesPer(instr); per > 0 {
+				ix := pfn.regIndex(instr.X)
+				return func(fr *frame) {
+					interp.chargeElems(reflect.ValueOf(fr.reg(ix)).Len(), per)
+					fn(fr)
+				}
+			}
+		}
+		return fn
 	case *ssa.MakeInterface:
 		typ := interp.preToType(instr.Type())
 		ir := pfn.regIndex(instr)
@@ -832,6 +855,9 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 				if buffer < 0 {
 					panic(fr.runtimeError(instr, "makechan: size out of range"))
 				}
+				if interp.lim.on {
+					interp.chargeElems(buffer, typ.Elem().Size())
+				}
 				fr.setReg(ir, reflect.MakeChan(typ, buffer).Interface())
 			}
 		}
@@ -841,6 +867,9 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			buffer := asInt(size)
 			if buffer < 0 {
 				panic(fr.runtimeError(instr, "makechan: size out of range"))
+			}
+			if interp.lim.on {
+				interp.chargeElems(buffer, ctyp.Elem().Size())
 			}
 			fr.setReg(ir, reflect.MakeChan(ctyp, buffer).Convert(typ).Interface())
 		}
@@ -856,6 +885,9 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		iv := pfn.regIndex(instr.Reserve)
 		return func(fr *frame) {
 			reserve := asInt(fr.reg(iv))
+			if interp.lim.on {
+				interp.chargeElems(reserve, rtyp.Key().Size()+rtyp.Elem().Size())
+			}
 			fr.setReg(ir, reflect.MakeMapWithSize(rtyp, reserve).Interface())
 		}
 	case *ssa.MakeSlice:
@@ -871,6 +903,9 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			Cap := asInt(fr.reg(ic))
 			if Cap < 0 || Cap >= maxMemLen {
 				panic(fr.runtimeError(instr, "makeslice: cap out of range"))
+			}
+			if interp.lim.on {
+				interp.chargeElems(Cap, typ.Elem().Size())
 			}
 			fr.setReg(ir, reflect.MakeSlice(typ, Len, Cap).Interface())
 		}
@@ -1241,7 +1276,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			atomic.AddInt32(&interp.goroutines, 1)
 			go func() {
 				defer atomic.AddInt32(&interp.goroutines, -1)
-				if interp.ctx.RunContext != nil {
+				if interp.ctx.RunContext != nil || interp.lim.on {
 					defer func() {
 						if e := recover(); e != nil {
 							interp.cherror <- PanicError{stack: debugStack(root), Value: e}
@@ -1314,9 +1349,32 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			if vv == nil {
 				v = reflect.Zero(interp.preToType(instr.Map.Type()).Elem())
 			}
+			if interp.lim.on {
+				size := int64(vm0Size(interp, instr))
+				return func(fr *frame) {
+					vm := reflect.ValueOf(fr.reg(im))
+					n := vm.Len()
+					vm.SetMapIndex(mapKeyValue(vm, fr.reg(ik)), v)
+					if vm.Len() > n {
+						interp.charge(size)
+					}
+				}
+			}
 			return func(fr *frame) {
 				vm := reflect.ValueOf(fr.reg(im))
 				vm.SetMapIndex(mapKeyValue(vm, fr.reg(ik)), v)
+			}
+		}
+		if interp.lim.on {
+			mtyp := interp.preToType(instr.Map.Type().Underlying().(*types.Map))
+			size := int64(mtyp.Key().Size() + mtyp.Elem().Size())
+			return func(fr *frame) {
+				vm := reflect.ValueOf(fr.reg(im))
+				n := vm.Len()
+				setMapIndex(vm, fr.reg(ik), fr.reg(iv))
+				if vm.Len() > n {
+					interp.charge(size)
+				}
 			}
 		}
 		return func(fr *frame) {

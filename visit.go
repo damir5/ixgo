@@ -427,6 +427,9 @@ func (visit *visitor) function(fn *ssa.Function) {
 					}
 				}
 			}
+			if visit.intp.lim.on && isBackEdge(b, instr) {
+				ifn = countStep(visit.intp, ifn)
+			}
 			Instrs[index] = ifn
 			ssaInstrs[index] = instr
 			index++

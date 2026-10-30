@@ -88,6 +88,10 @@ type Context struct {
 	Loader        Loader                                                   // types loader
 	BuildContext  build.Context                                            // build context, default build.Default
 	RunContext    context.Context                                          // run context, default unset
+	MaxSteps      int64                                                    // stop after this many branches and calls (0: no limit)
+	MaxAlloc      int64                                                    // stop after charging this many bytes at allocations (0: no limit)
+	MaxHeapAlloc  uint64                                                   // stop when the process has allocated this many bytes since the run started (0: no limit)
+	MaxCallDepth  int32                                                    // stop when interpreted calls nest deeper than this (0: no limit)
 	Importer      types.Importer                                           // importer
 	output        io.Writer                                                // capture print/println output
 	FileSet       *token.FileSet                                           // file set
@@ -774,6 +778,10 @@ func (ctx *Context) RunInterp(interp *Interp, input string, args []string) (exit
 	if ctx.RunContext != nil {
 		return ctx.runInterpWithContext(interp, input, args, ctx.RunContext)
 	}
+	if interp.lim.on {
+		// A limit hit in a goroutine reaches the caller through cherror.
+		return ctx.runInterpWithContext(interp, input, args, context.Background())
+	}
 	return ctx.runInterp(interp, input, args)
 }
 
@@ -799,6 +807,10 @@ func (p *Context) runInterpWithContext(interp *Interp, input string, args []stri
 	case err = <-ch:
 	case e := <-interp.cherror:
 		switch v := e.Value.(type) {
+		case limitPanic:
+			err = v.err
+			interp.Abort()
+			exitCode = 2
 		case exitPanic:
 			exitCode = int(v)
 		default:

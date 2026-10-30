@@ -139,6 +139,23 @@ import (
 These packages work with the standard Go toolchain. See each package's documentation
 for supported paths and limitations.
 
+### limits (optional)
+
+A `Context` can stop a program that runs too long or allocates too much. The run then returns an error; `recover()` in the program does not stop it. Each limit is off when 0.
+
+```go
+ctx := ixgo.NewContext(0)
+ctx.MaxSteps = 1e7          // branches back to an earlier block, plus calls -> ixgo.ErrStepLimit
+ctx.MaxCallDepth = 10000    // nested interpreted calls -> ixgo.ErrCallDepthLimit
+ctx.MaxAlloc = 64 << 20     // bytes charged before new, make, append growth, map inserts,
+                            // string concatenation and string/slice conversions -> ixgo.ErrAllocLimit
+ctx.MaxHeapAlloc = 256 << 20 // process-wide heap allocation since the run started, sampled
+                            // every 256 steps -> ixgo.ErrHeapAllocLimit
+_, err := ctx.RunFile("main.go", src, nil)
+```
+
+`MaxAlloc` does not see allocations inside native Go functions (for example `strings.Repeat`); wrap such functions before registering them. `MaxHeapAlloc` counts the whole process, so it is a backstop, not an exact per-program number.
+
 ### ixgo demo
 
 #### The XGo Playground (WebAssembly)

@@ -24,6 +24,18 @@ import (
 )
 
 func makeBinOpADD(pfn *function, instr *ssa.BinOp) func(fr *frame) {
+	fn := makeBinOpADD0(pfn, instr)
+	if interp := pfn.Interp; interp.lim.on && pfn.Interp.preToType(instr.Type()).Kind() == reflect.String {
+		ix, iy := pfn.regIndex(instr.X), pfn.regIndex(instr.Y)
+		return func(fr *frame) {
+			interp.charge(int64(reflect.ValueOf(fr.reg(ix)).Len() + reflect.ValueOf(fr.reg(iy)).Len()))
+			fn(fr)
+		}
+	}
+	return fn
+}
+
+func makeBinOpADD0(pfn *function, instr *ssa.BinOp) func(fr *frame) {
 	ir := pfn.regIndex(instr)
 	ix, kx, vx := pfn.regIndex3(instr.X)
 	iy, ky, vy := pfn.regIndex3(instr.Y)

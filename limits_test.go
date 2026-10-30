@@ -150,7 +150,7 @@ func main() {
 func BenchmarkLoopNoLimits(b *testing.B) { benchLoop(b, nil) }
 
 func BenchmarkLoopWithLimits(b *testing.B) {
-	benchLoop(b, func(ctx *ixgo.Context) { ctx.MaxSteps, ctx.MaxAlloc = 1e12, 1 << 40 })
+	benchLoop(b, func(ctx *ixgo.Context) { ctx.MaxSteps, ctx.MaxAlloc = 1e12, 1<<40 })
 }
 
 func benchLoop(b *testing.B, setup func(*ixgo.Context)) {

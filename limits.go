@@ -23,6 +23,7 @@ import (
 	"runtime/metrics"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/visualfc/gid"
 	"golang.org/x/tools/go/ssa"
@@ -53,6 +54,10 @@ type limits struct {
 	steps        atomic.Int64
 	charged      atomic.Int64
 	heapBase     uint64
+	spot         sync.Mutex // guards the last* fields
+	lastTime     int64
+	lastHeap     uint64
+	lastCharged  int64
 	err          atomic.Pointer[error]
 }
 
@@ -70,8 +75,9 @@ func (l *limits) init(ctx *Context) {
 	l.maxHeapAlloc = ctx.MaxHeapAlloc
 	l.maxDepth = ctx.MaxCallDepth
 	l.on = l.maxSteps > 0 || l.maxAlloc > 0 || l.maxHeapAlloc > 0 || l.maxDepth > 0
-	if l.maxHeapAlloc > 0 {
+	if l.maxHeapAlloc > 0 || l.maxAlloc > 0 {
 		l.heapBase = heapAllocated()
+		l.lastTime, l.lastHeap = time.Now().UnixNano(), l.heapBase
 	}
 }
 
@@ -97,12 +103,55 @@ func (i *Interp) step() {
 	if i.lim.maxSteps > 0 && n > i.lim.maxSteps {
 		i.exceed(ErrStepLimit)
 	}
-	if i.lim.maxHeapAlloc > 0 && n%heapSampleSteps == 0 && heapAllocated()-i.lim.heapBase > i.lim.maxHeapAlloc {
-		i.exceed(ErrHeapAllocLimit)
+	if (i.lim.maxHeapAlloc > 0 || i.lim.maxAlloc > 0) && n%heapSampleSteps == 0 {
+		heap := heapAllocated()
+		if i.lim.maxHeapAlloc > 0 && heap-i.lim.heapBase > i.lim.maxHeapAlloc {
+			i.exceed(ErrHeapAllocLimit)
+		}
+		if i.lim.maxAlloc > 0 {
+			i.spotCheck(heap)
+		}
 	}
 	if atomic.LoadInt32(&i.exited) == 1 && i.limitErr() != nil {
 		panic(limitPanic{i.limitErr()})
 	}
+}
+
+// Spot check constants. Wrapped Go functions charge what they return or keep,
+// and their temporary buffers measured at most 6.3 times that, so heap growth
+// up to spotFactor times the charges is expected. spotSlack and spotRate
+// cover the interpreter's own allocations and other goroutines of the host.
+const (
+	spotFactor = 8
+	spotSlack  = 1 << 20 // bytes per check
+	spotRate   = 1       // bytes per nanosecond between checks
+	// A native call slower than this is checked when it returns. Clearing
+	// memory runs at about 10 GB/s, so this is about 1 MB of allocation.
+	spotCallTime = 100 * time.Microsecond
+)
+
+// spotCheck charges heap growth since the last check that the charges in the
+// same window do not explain: allocations in Go code that no wrapper covers,
+// such as an interface call on a bytes.Buffer. It charges late, at most
+// heapSampleSteps steps after the allocation. ponytail: the heap counter is
+// process-wide, so a host allocating more than spotRate while the program
+// runs can be charged to it; per-call measurement is the upgrade.
+func (i *Interp) spotCheck(heap uint64) {
+	l := &i.lim
+	if !l.spot.TryLock() {
+		return
+	}
+	now, charged := time.Now().UnixNano(), l.charged.Load()
+	grown := int64(heap - l.lastHeap)
+	explained := spotFactor*(charged-l.lastCharged) + spotSlack + spotRate*(now-l.lastTime)
+	l.lastTime, l.lastHeap, l.lastCharged = now, heap, charged
+	if excess := grown - explained; excess > 0 {
+		l.lastCharged += excess
+		l.spot.Unlock()
+		i.charge(excess)
+		return
+	}
+	l.spot.Unlock()
 }
 
 // charge counts n bytes against MaxAlloc before an allocation is made.
@@ -132,11 +181,16 @@ var natives sync.Map // uint64 -> *Interp
 func (i *Interp) bindNative() func() {
 	id := gid.Get()
 	prev, had := natives.Swap(id, i)
+	start := time.Now()
 	return func() {
 		if had {
 			natives.Store(id, prev)
 		} else {
 			natives.Delete(id)
+		}
+		// Allocating a lot takes time, so a slow call gets a spot check.
+		if i.lim.maxAlloc > 0 && time.Since(start) > spotCallTime {
+			i.spotCheck(heapAllocated())
 		}
 	}
 }

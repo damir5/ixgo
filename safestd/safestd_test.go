@@ -76,6 +76,22 @@ func TestAmplifyingCallsStop(t *testing.T) {
 	}
 }
 
+// Allocations that no wrapper sees are charged by the heap spot check.
+func TestUncoveredPathsAreSpotChecked(t *testing.T) {
+	cases := map[string][2]string{
+		"Write through io.Writer": {`"bytes"; "strings"`, `var b bytes.Buffer; var w interface{ Write([]byte) (int, error) } = &b; p := []byte(strings.Repeat("x", 1<<16)); for { w.Write(p) }`},
+		"base64 stream encoder":   {`"bytes"; "encoding/base64"; "strings"`, `var b bytes.Buffer; e := base64.NewEncoder(base64.StdEncoding, &b); p := []byte(strings.Repeat("x", 1<<16)); for { e.Write(p) }`},
+		"errors.Join message":     {`"errors"; "strings"`, `e := errors.New(strings.Repeat("x", 1<<20)); errs := make([]error, 64); for k := range errs { errs[k] = e }; j := errors.Join(errs...); var keep []string; for { keep = append(keep, j.Error()) }`},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := run(t, c[0], c[1]); !errors.Is(err, ixgo.ErrAllocLimit) {
+				t.Fatalf("got %v, want ErrAllocLimit", err)
+			}
+		})
+	}
+}
+
 // fmt overflows the Go stack on a value that contains itself, which kills
 // the host process; the wrapper must turn it into a program panic.
 func TestCyclicValueIsAProgramPanic(t *testing.T) {

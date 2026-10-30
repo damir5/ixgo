@@ -26,7 +26,7 @@ A wrapper that charges after the call does not prevent the allocation. It stops 
 - `ixgo.Refund(n int64)` returns bytes charged as an upper bound that the call did not keep.
 - `ctx.RegisterExternal(name, fn)` installs a wrapper. `name` is `pkg.Func`, or `(*pkg.Type).Method` for a method. `fn` has the same signature as the original; a method takes its receiver as the first parameter.
 
-The charge functions find the program through the goroutine. When a limit is set, ixgo records the program for the goroutine during each Go function call. Outside such a call they do nothing. Measured cost on an M3 Max: 1M calls to `strings.Index` took 386 ms without limits and 477 ms with limits, about 91 ns per call.
+The charge functions find the program through the goroutine. When a limit is set, ixgo records the program for the goroutine during each Go function call. Outside such a call they do nothing. Measured cost on an M3 Max, median of five runs: 1M calls to `strings.Index` took 188 ms without limits and 308 ms with `MaxSteps` and `MaxAlloc` set, about 120 ns per call. That includes the spot check below.
 
 ## Covered packages
 
@@ -120,9 +120,20 @@ These ratios are total bytes allocated per input byte, measured with `runtime.Me
 | `strings.Map` to U+10FFFF | 20.2 |
 | `strings.ToUpper` of invalid UTF-8 | 11.4 |
 
-## Not covered
+## Spot check
 
-These paths still allocate without a charge. `MaxHeapAlloc` is the backstop for them.
+When `MaxAlloc` is set, ixgo also compares the process heap growth with the charges. It does this every 256 steps, and after any native call slower than 100 µs, because allocating a lot takes time. If the heap grew by more than 8 times the charges in that window, plus 1 MB, plus 1 byte per nanosecond since the last check, ixgo charges the difference. The factor 8 covers the temporary buffers of wrapped calls; the largest measured was 6.3 times what the call keeps (`%#v` of a byte slice).
+
+The spot check charges after the allocation, so it stops the program late: up to 256 steps late, or one slow call late. It is a heuristic in three ways:
+- the heap counter covers the whole process, so a host that allocates faster than 1 byte per nanosecond while the program runs can be charged to the program;
+- a program that charges a lot can allocate up to 8 times that uncharged;
+- a native call that allocates without taking long enough to trigger the slow-call check waits for the next 256-step check.
+
+Tests: a `Write` through an interface, a `base64.NewEncoder` stream and `errors.Join(...).Error()` on a long message each stop with `ErrAllocLimit`. With the check turned off, the same programs ran until the 110 s timeout.
+
+## Not covered by a wrapper
+
+These paths allocate without a wrapper. The spot check charges them late, and `MaxHeapAlloc` is the backstop.
 
 1. **Interface calls on Go types.** `RegisterExternal` replaces static calls and function values. A call through an interface goes to the original method. For example, `var w io.Writer = &buf; w.Write(p)` grows `buf` without a charge.
 2. **Writers and readers that Go code returns.** `base64.NewEncoder`, `hex.NewEncoder` and `hex.Dumper` write into their destination from Go code.

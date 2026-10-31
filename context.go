@@ -93,6 +93,7 @@ type Context struct {
 	MaxHeapAlloc  uint64                                                   // stop when the process has allocated this many bytes since the run started (0: no limit)
 	MaxCallDepth  int32                                                    // stop when interpreted calls nest deeper than this (0: no limit)
 	Deterministic bool                                                     // range over maps in key order; refuse go statements and multi-case selects
+	KeepArgs      bool                                                     // leave the process's os.Args and flag.CommandLine unchanged while a program runs
 	Importer      types.Importer                                           // importer
 	output        io.Writer                                                // capture print/println output
 	FileSet       *token.FileSet                                           // file set
@@ -828,6 +829,12 @@ var (
 )
 
 func (ctx *Context) runInterp(interp *Interp, input string, args []string) (exitCode int, err error) {
+	if ctx.KeepArgs {
+		if err = interp.RunInit(); err != nil {
+			return 2, err
+		}
+		return interp.RunMain()
+	}
 	// reset os args and flag
 	commandMu.Lock()
 	oldArgs := os.Args

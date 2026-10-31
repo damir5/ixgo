@@ -35,8 +35,11 @@ var ErrImport = errors.New("safestd: import not allowed")
 // allow, such as the host's tool packages, plus DeterministicPackages when
 // Deterministic set up ctx. It refuses "unsafe", which
 // //go:linkname also needs. It stops ixgo from loading any package from
-// source files, so a package that is not registered is not found.
+// source files, so a package that is not registered is not found. Since a
+// program can then import neither os nor flag, it also sets KeepArgs: the
+// host's os.Args stay as they are while programs run, also several at once.
 func Restrict(ctx *ixgo.Context, allow ...string) {
+	ctx.KeepArgs = true
 	ctx.Lookup = func(root, path string) (string, bool) { return "", false }
 	b := &ctx.BuildContext
 	b.GOROOT, b.GOPATH = "", ""

@@ -18,6 +18,8 @@ package safestd_test
 
 import (
 	"errors"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -225,5 +227,20 @@ func TestRestrictImports(t *testing.T) {
 				t.Fatalf("got %v, want an error with %q", err, c.want)
 			}
 		})
+	}
+}
+
+// A restricted run leaves the host's os.Args alone, so host code called
+// from the program, and other runs at the same time, see the real ones.
+func TestRestrictKeepsHostArgs(t *testing.T) {
+	ctx := ixgo.NewContext(0)
+	safestd.Register(ctx)
+	ctx.AddImportFile("host", "host.go", "package host\n\nfunc Arg0() string\n")
+	ctx.RegisterExternal("host.Arg0", func() string { return os.Args[0] })
+	safestd.Restrict(ctx, "host")
+	want := os.Args[0]
+	src := "package main\n\nimport \"host\"\n\nfunc main() { if host.Arg0() != " + strconv.Quote(want) + " { panic(host.Arg0()) } }\n"
+	if _, err := ctx.RunFile("main.go", src, nil); err != nil {
+		t.Fatal(err)
 	}
 }

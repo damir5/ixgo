@@ -149,6 +149,7 @@ ixgo registers packages for the whole process, so a host that registered `os` fo
 - It refuses `unsafe`, which `//go:linkname` also needs.
 - It checks only the program's own imports. Dependencies of an allowed package pass, because `slices` and `maps` import `unsafe` in their source.
 - It stops ixgo from loading packages from source files. Without that, an import of a package that is not registered, such as `container/list`, loads it from the Go installation and runs it.
+- It sets `Context.KeepArgs`, so a run leaves the process's `os.Args` and `flag.CommandLine` unchanged. Without it, `RunFile` sets both for the whole process while the program runs: host code called from the program saw `main.go` as `os.Args[0]`, and two runs at the same time wrote the same variables. A restricted program cannot import `os` or `flag`, so it loses nothing.
 
 | Package | Why it is excluded |
 |---|---|

@@ -92,6 +92,7 @@ type Context struct {
 	MaxAlloc      int64                                                    // stop after charging this many bytes at allocations (0: no limit)
 	MaxHeapAlloc  uint64                                                   // stop when the process has allocated this many bytes since the run started (0: no limit)
 	MaxCallDepth  int32                                                    // stop when interpreted calls nest deeper than this (0: no limit)
+	Deterministic bool                                                     // range over maps in key order; refuse go statements and multi-case selects
 	Importer      types.Importer                                           // importer
 	output        io.Writer                                                // capture print/println output
 	FileSet       *token.FileSet                                           // file set

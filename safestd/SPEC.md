@@ -157,8 +157,26 @@ ixgo registers packages for the whole process, so a host that registered `os` fo
 | `regexp` | `ReplaceAll*` with `$1` expands a match per reference; `FindAll*` returns many matches. |
 | `bufio` | `NewReaderSize`, `NewWriterSize` and `Scanner.Buffer` take sizes from arguments. |
 | `io`, `os`, `net/...` | `ReadAll` and `Copy` read without a bound, and the host's files and network are exposed. |
-| `time` | `Format` needs a wrapper (output up to 3 times the layout). `AfterFunc` runs program code on a Go goroutine; ixgo now reports a panic there as the run's error, but the program can still sleep and start timers. |
+| `time` | Allowed only after `Deterministic`, which wraps it (see below). Otherwise `Format` is not charged, `AfterFunc` runs program code on a Go goroutine, and the program can sleep and start timers. |
 | `strings.Builder` through `io.Writer` | See item 1 above. |
+
+## Deterministic runs
+
+`Deterministic(ctx, start, seed)` sets `ixgo.Context.Deterministic` and lets `Restrict` also allow `DeterministicPackages` (`time`, `math/rand/v2`). It returns the `Clock` the host advances to each tool result's time.
+
+| Function | Replacement |
+|---|---|
+| `time.Now`, `Since`, `Until` | read the `Clock`: UTC, no monotonic reading, never going back |
+| `time.Sleep` | moves the `Clock` forward, does not wait |
+| `time.Unix`, `UnixMilli`, `UnixMicro`, `Time.Local`, the variable `time.Local` | UTC |
+| `time.LoadLocation` | `""` and `"UTC"` only; others return an error |
+| `time.After`, `Tick`, `NewTimer`, `NewTicker`, `AfterFunc` | panic |
+| `Time.Format` | charges 3 times the layout plus the zone name for each `MST` |
+| `Time.AppendFormat` | charges the grown array |
+| top-level `math/rand/v2` functions | a PCG source seeded with `seed`; `Perm` charges 8 bytes per element |
+| fmt print functions | panic on the `%p` verb and on pointers, channels and functions that fmt prints as an address |
+
+`Context.Deterministic` in ixgo ranges over maps in key order, panics on pointer and channel keys, and refuses a program with a `go` statement or a `select` with more than one channel case before it runs. `deterministic_test.go` checks that a program using maps, `maps.Keys`, random numbers, time and sleep prints the same output in 21 runs, that another seed gives other numbers, each refusal, and that `Format` with a 1 MiB zone name stops before the host allocates the output (6 GB without the wrapper).
 
 ## Checks
 

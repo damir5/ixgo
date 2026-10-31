@@ -32,7 +32,8 @@ import (
 var ErrImport = errors.New("safestd: import not allowed")
 
 // Restrict lets programs run in ctx import only Packages and the packages in
-// allow, such as the host's tool packages. It refuses "unsafe", which
+// allow, such as the host's tool packages, plus DeterministicPackages when
+// Deterministic set up ctx. It refuses "unsafe", which
 // //go:linkname also needs. It stops ixgo from loading any package from
 // source files, so a package that is not registered is not found.
 func Restrict(ctx *ixgo.Context, allow ...string) {
@@ -43,7 +44,11 @@ func Restrict(ctx *ixgo.Context, allow ...string) {
 	b.HasSubdir = func(root, dir string) (string, bool) { return "", false }
 	b.ReadDir = func(dir string) ([]fs.FileInfo, error) { return nil, fs.ErrNotExist }
 	b.OpenFile = func(path string) (io.ReadCloser, error) { return nil, fs.ErrNotExist }
-	ctx.Importer = &restricted{next: ctx.Importer, allow: append(slices.Clone(Packages), allow...)}
+	allow = append(slices.Clone(Packages), allow...)
+	if ctx.Deterministic {
+		allow = append(allow, DeterministicPackages...)
+	}
+	ctx.Importer = &restricted{next: ctx.Importer, allow: allow}
 }
 
 // restricted checks only the program's own imports. The type checker

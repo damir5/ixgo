@@ -107,6 +107,12 @@ func constToValue(i *Interp, c *ssa.Const) value {
 func globalToValue(i *Interp, key *ssa.Global) (interface{}, bool) {
 	if key.Pkg != nil {
 		pkgpath := key.Pkg.Pkg.Path()
+		// A variable registered with RegisterExternal replaces the package's.
+		if v, ok := i.ctx.override.Load(pkgpath + "." + key.Name()); ok {
+			if ext := v.(reflect.Value); ext.Kind() == reflect.Ptr {
+				return ext.Interface(), true
+			}
+		}
 		if pkg, ok := i.installed(pkgpath); ok {
 			if ext, ok := pkg.Vars[key.Name()]; ok {
 				return ext.Interface(), true

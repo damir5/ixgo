@@ -1476,6 +1476,11 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 			}
 		}
 	}
+	if ctx.Deterministic {
+		if err := checkDeterministic(prog, pkgs); err != nil {
+			return i, err
+		}
+	}
 	// static types check
 	err := checkPackages(i, pkgs)
 	if err != nil {

@@ -84,6 +84,7 @@ func jsonBound(v any) int {
 // arguments with any verbs: the format text, every width and precision it
 // can apply, and each argument. It panics with ErrCyclicValue or ErrTooDeep.
 func fmtBound(format string, args []any) int {
+	refuseAddresses(format, args)
 	pad, float := fmtPads(format)
 	w := walker{float: float, path: map[visit]bool{}}
 	n := len(format) + pad + 2*len(args)

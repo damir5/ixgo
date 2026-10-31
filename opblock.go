@@ -1104,6 +1104,11 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 				fr.setReg(ir, &stringIter{Reader: strings.NewReader(v)})
 			}
 		case reflect.Map:
+			if interp.ctx.Deterministic {
+				return func(fr *frame) {
+					fr.setReg(ir, newSortedMapIter(interp, reflect.ValueOf(fr.reg(ix))))
+				}
+			}
 			return func(fr *frame) {
 				v := fr.reg(ix)
 				fr.setReg(ir, &mapIter{iter: reflect.ValueOf(v).MapRange()})
@@ -1120,7 +1125,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			}
 		}
 		return func(fr *frame) {
-			fr.setReg(ir, fr.reg(ii).(*mapIter).next())
+			fr.setReg(ir, fr.reg(ii).(interface{ next() tuple }).next())
 		}
 	case *ssa.TypeAssert:
 		typ := interp.preToType(instr.AssertedType)

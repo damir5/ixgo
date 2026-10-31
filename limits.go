@@ -74,7 +74,7 @@ func (l *limits) init(ctx *Context) {
 	l.maxAlloc = ctx.MaxAlloc
 	l.maxHeapAlloc = ctx.MaxHeapAlloc
 	l.maxDepth = ctx.MaxCallDepth
-	l.on = l.maxSteps > 0 || l.maxAlloc > 0 || l.maxHeapAlloc > 0 || l.maxDepth > 0
+	l.on = l.maxSteps > 0 || l.maxAlloc > 0 || l.maxHeapAlloc > 0 || l.maxDepth > 0 || ctx.Deterministic // InDeterministicRun needs the native binding
 	if l.maxHeapAlloc > 0 || l.maxAlloc > 0 {
 		l.heapBase = heapAllocated()
 		l.lastTime, l.lastHeap = time.Now().UnixNano(), l.heapBase

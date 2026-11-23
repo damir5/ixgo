@@ -161,6 +161,14 @@ func (i *Interp) charge(n int64) {
 	}
 }
 
+// chargeOutput charges print output kept by the buffer set with
+// SetPrintOutput. Output written to os.Stdout is not kept and not charged.
+func (i *Interp) chargeOutput(n int) {
+	if i.ctx.output != nil {
+		i.charge(int64(n))
+	}
+}
+
 // chargeElems charges n elements of size bytes each, refusing overflow.
 func (i *Interp) chargeElems(n int, size uintptr) {
 	if i.lim.maxAlloc <= 0 {

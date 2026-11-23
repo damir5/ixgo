@@ -85,6 +85,7 @@ func (inter *Interp) callBuiltin(fr *frame, fn *ssa.Builtin, args []value, ssaAr
 		if ln {
 			buf.WriteRune('\n')
 		}
+		inter.chargeOutput(buf.Len())
 		inter.ctx.writeOutput(buf.Bytes())
 		return nil
 
@@ -270,6 +271,7 @@ func (inter *Interp) callBuiltinDiscardsResult(fr *frame, fn *ssa.Builtin, args 
 		if ln {
 			buf.WriteRune('\n')
 		}
+		inter.chargeOutput(buf.Len())
 		inter.ctx.writeOutput(buf.Bytes())
 
 	case "len":
@@ -407,6 +409,7 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 			if ln {
 				buf.WriteRune('\n')
 			}
+			interp.chargeOutput(buf.Len())
 			interp.ctx.writeOutput(buf.Bytes())
 		}
 

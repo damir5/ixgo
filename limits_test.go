@@ -17,6 +17,7 @@
 package ixgo_test
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 
@@ -109,6 +110,31 @@ func TestAllocLimit(t *testing.T) {
 			err := runLimited(t, body, alloc(testMaxAlloc))
 			if !errors.Is(err, ixgo.ErrAllocLimit) {
 				t.Fatalf("got %v, want ErrAllocLimit", err)
+			}
+		})
+	}
+}
+
+// Output kept by SetPrintOutput must be charged as it is printed, so a print
+// loop stops near MaxAlloc instead of when the heap spot check catches it.
+func TestPrintOutputCharged(t *testing.T) {
+	const limit = 4 << 20
+	cases := map[string]string{
+		"println":        `func main() { s := string(make([]byte, 64<<10)); for { println(s) } }`,
+		"deferred print": `func p(s string) { defer print(s) }; func main() { s := string(make([]byte, 64<<10)); for { p(s) } }`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := runLimited(t, body, func(ctx *ixgo.Context) {
+				ctx.MaxAlloc, ctx.MaxSteps = limit, 1e6
+				ctx.SetPrintOutput(&buf)
+			})
+			if !errors.Is(err, ixgo.ErrAllocLimit) {
+				t.Fatalf("got %v, want ErrAllocLimit", err)
+			}
+			if buf.Len() > limit {
+				t.Fatalf("captured %d bytes, want at most %d", buf.Len(), limit)
 			}
 		})
 	}

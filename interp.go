@@ -103,6 +103,8 @@ type Interp struct {
 	gcEnabled    bool                                        // program can invoke runtime.GC
 	execution    *ExecutionTracker                           // optional execution tracking session
 	lim          limits                                      // optional step and allocation limits
+	own          []reflect.Value                             // the package variables the program declares, for Reset
+	goErr        atomic.Pointer[PanicError]                  // the first panic of a goroutine, without RunContext
 	interpExt
 }
 
@@ -1427,6 +1429,7 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 	i.record.Load(mainpkg)
 
 	var pkgs []*ssa.Package
+	created := map[string]any{} // the variables made here, not the host's
 
 	for _, pkg := range prog.AllPackages() {
 		// skip external pkg
@@ -1445,6 +1448,7 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 					i.chkinit[key] = true
 				} else {
 					i.globals[key] = reflect.New(typ).Interface()
+					created[key] = i.globals[key]
 				}
 			}
 		}
@@ -1474,6 +1478,11 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 			if fv, ok := globals[k]; ok {
 				i.globals[k] = fv
 			}
+		}
+	}
+	for k, v := range created {
+		if i.globals[k] == v {
+			i.own = append(i.own, reflect.ValueOf(v).Elem())
 		}
 	}
 	if ctx.Deterministic {
@@ -1663,6 +1672,57 @@ func (i *Interp) UnsafeRelease() {
 
 func (i *Interp) Abort() {
 	atomic.StoreInt32(&i.exited, 1)
+}
+
+// Reset makes i ready to run its program again as a new Interp of the same
+// package would, without making its types and functions again: it sets the
+// package variables the program declares to zero (variables of the host
+// stay), sets the counters of the limits to zero, and clears a recorded
+// limit error or goroutine panic, Abort and os.Exit. It makes the calling
+// goroutine the main goroutine, so call it on the goroutine that runs the
+// program next. Run init again after it, which gives the package variables
+// their initial values. Reset fails while a goroutine that the program
+// started still runs; Abort stops one at its next branch, but not one that
+// waits, such as on a channel.
+func (i *Interp) Reset() error {
+	if n := atomic.LoadInt32(&i.goroutines) - 1; n != 0 {
+		return fmt.Errorf("ixgo: reset: %d goroutines of the program still run", n)
+	}
+	for _, v := range i.own {
+		v.SetZero()
+	}
+	i.deferMap.Clear()
+	atomic.StoreInt32(&i.deferCount, 0)
+	i.lim.steps.Store(0)
+	i.lim.charged.Store(0)
+	i.lim.err.Store(nil)
+	i.lim.lastCharged = 0
+	i.lim.init(i.ctx)
+	i.goErr.Store(nil)
+	i.exitCode, i.goexited = 0, 0
+	atomic.StoreInt32(&i.exited, 0)
+	i.mainid = GoroutineID()
+	return nil
+}
+
+// Goroutines returns the number of goroutines that the program started and
+// that still run.
+func (i *Interp) Goroutines() int {
+	return int(atomic.LoadInt32(&i.goroutines) - 1)
+}
+
+// Err returns the error that stopped the program in one of its goroutines
+// when no RunContext and no RunInterp waits for it: the exceeded limit, else
+// the goroutine's panic. The goroutine aborts the program, so RunFunc then
+// returns without an error; check Err after it.
+func (i *Interp) Err() error {
+	if err := i.limitErr(); err != nil {
+		return err
+	}
+	if p := i.goErr.Load(); p != nil {
+		return *p
+	}
+	return nil
 }
 
 func (i *Interp) RunMain() (exitCode int, err error) {

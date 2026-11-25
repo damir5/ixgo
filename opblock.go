@@ -1284,7 +1284,15 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 				if interp.ctx.RunContext != nil || interp.lim.on {
 					defer func() {
 						if e := recover(); e != nil {
-							interp.cherror <- PanicError{stack: debugStack(root), Value: e}
+							pe := PanicError{stack: debugStack(root), Value: e}
+							if interp.cherror != nil {
+								interp.cherror <- pe
+								return
+							}
+							// No one receives from cherror: RunFunc ran the
+							// program. Keep the first panic for Err.
+							interp.goErr.CompareAndSwap(nil, &pe)
+							interp.Abort()
 						}
 					}()
 				}
